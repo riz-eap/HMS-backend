@@ -1,6 +1,14 @@
 // server.js - Express backend (CommonJS)
 const express = require('express');
 const cors = require('cors');
+const FRONTEND_URL = process.env.FRONTEND_URL || '*';
+
+app.use(cors({
+  origin: FRONTEND_URL,
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  credentials: true
+}));
+
 const dotenv = require('dotenv');
 const path = require('path');
 dotenv.config();
