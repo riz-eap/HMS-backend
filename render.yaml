@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: hospital-management-backend
+    env: node
+    buildCommand: ""
+    startCommand: "node server.js"
