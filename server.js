@@ -1,55 +1,42 @@
-// server.js
+// server.js - main entry
 require('dotenv').config();
 const express = require('express');
+const bodyParser = require('body-parser');
 const cors = require('cors');
-const path = require('path');
 
 const authRoutes = require('./routes/auth');
-const usersRoutes = require('./routes/users');
-const doctorsRoutes = require('./routes/doctors');
 const patientsRoutes = require('./routes/patients');
-const appointmentsRoutes = require('./routes/appointments');
 
+const roomsRoutes = require('./routes/rooms');
+const roomAssignmentsRoutes = require('./routes/room_assignments');
+const staffRoutes = require('./routes/staff');
+const medicinesRoutes = require('./routes/medicines');
+const medicineIssuesRoutes = require('./routes/medicine_issues');
+const patientHistoryRoutes = require('./routes/patient_history');
 
+const app = express();
+app.use(cors());
+app.use(bodyParser.json({ limit: '1mb' }));
+app.use(bodyParser.urlencoded({ extended: true }));
 
+// root health
+app.get('/', (req, res) => res.json({ message: 'HMS backend running' }));
 
-const app = express(); // <- must be before using app
-
-// JSON body parser
-app.use(express.json());
-
-// CORS - allow only your frontend origin if set, otherwise allow all (development)
-const FRONTEND_URL = process.env.FRONTEND_URL || '*';
-app.use(cors({
-  origin: FRONTEND_URL,
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  credentials: true
-}));
-
-// Optional: serve static frontend if you keep front inside repo (comment/uncomment as needed)
-// const staticPath = path.join(__dirname, 'public');
-// app.use(express.static(staticPath));
-
-// Mount API routes
+// mount routes under /api
 app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientsRoutes);
-app.use('/api/users', usersRoutes);
-app.use('/api/doctors', doctorsRoutes);
-app.use('/api/appointments', appointmentsRoutes);
 
-// root health-check
-app.get('/', (req, res) => {
-  res.send('Hospital Management Backend is running');
+app.use('/api/rooms', roomsRoutes);
+app.use('/api/room_assignments', roomAssignmentsRoutes);
+app.use('/api/staff', staffRoutes);
+app.use('/api/medicines', medicinesRoutes);
+app.use('/api/medicine_issues', medicineIssuesRoutes);
+app.use('/api/patient_history', patientHistoryRoutes);
+
+// Generic 404
+app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+
+const port = process.env.PORT || 3001;
+app.listen(port, () => {
+  console.log(`Server started on port ${port}`);
 });
-
-// 404 handler
-app.use((req, res) => res.status(404).send('Not Found'));
-
-// Error handler (simple)
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Server error' });
-});
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
