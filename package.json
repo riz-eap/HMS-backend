@@ -11,8 +11,5 @@
     "cors": "^2.8.5",
     "jsonwebtoken": "^9.0.0",
     "bcryptjs": "^2.4.3"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
   }
 }
