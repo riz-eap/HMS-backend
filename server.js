@@ -6,6 +6,13 @@ const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const patientsRoutes = require('./routes/patients');
+const usersRoutes = require('./routes/users');
+const doctorsRoutes = require('./routes/doctors');
+const patientsRoutes = require('./routes/patients');
+const appointmentsRoutes = require('./routes/appointments');
+
+
+
 
 const app = express(); // <- must be before using app
 
@@ -27,6 +34,9 @@ app.use(cors({
 // Mount API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientsRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/doctors', doctorsRoutes);
+app.use('/api/appointments', appointmentsRoutes);
 
 // root health-check
 app.get('/', (req, res) => {
