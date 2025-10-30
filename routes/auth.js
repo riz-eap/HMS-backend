@@ -9,8 +9,8 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 // Config
-const JWT_SECRET = process.env.JWT_SECRET || 'hms_default_secret_change_me';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d'; // token lifetime
+const JWT_SECRET = process.env.JWT_SECRET || '3b5fc14c2e6bdf29f91a57c7e1b612d8f6aa!t@r5D7e';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '10d'; // token lifetime
 
 // Helper: sign a token for a user object (keep minimal payload)
 function signToken(user) {
