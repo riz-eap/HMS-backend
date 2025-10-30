@@ -5,7 +5,6 @@ const cors = require('cors');
 const path = require('path');
 
 const authRoutes = require('./routes/auth');
-const patientsRoutes = require('./routes/patients');
 const usersRoutes = require('./routes/users');
 const doctorsRoutes = require('./routes/doctors');
 const patientsRoutes = require('./routes/patients');
