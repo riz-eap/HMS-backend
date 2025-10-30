@@ -2,7 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const app = express();
@@ -71,7 +71,7 @@ app.post('/api/auth/register', async (req, res) => {
     const existing = await query('SELECT id FROM users WHERE lower(email)=lower($1)', [email]);
     if (existing.rows.length) return res.status(409).json({ error: 'Email already exists' });
 
-    const hashed = await bcrypt.hash(password, 10);
+    const hashed = bcrypt.hashSync(password, 10);
     const result = await query(
       'INSERT INTO users (name, email, password, role, created_at) VALUES ($1,$2,$3,$4,now()) RETURNING id, name, email, role, created_at',
       [name || null, email, hashed, role]
@@ -102,7 +102,7 @@ app.post('/api/auth/login', async (req, res) => {
     const { rows } = await query('SELECT id, name, email, password, role FROM users WHERE lower(email)=lower($1)', [email]);
     if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
     const user = rows[0];
-    const ok = await bcrypt.compare(password, user.password);
+    const ok = bcrypt.compareSync(password, user.password);
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
