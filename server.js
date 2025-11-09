@@ -1,4 +1,4 @@
-// server.js — HMS backend single-file implementation
+// server.js — HMS backend single-file implementation (updated)
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -19,10 +19,11 @@ if (!DATABASE_URL) {
   console.error('ERROR: DATABASE_URL environment variable is not set.');
   process.exit(1);
 }
-if (!JWT_SECRET) {
-  console.error('ERROR: JWT_SECRET environment variable is not set.');
-  process.exit(1);
-}
+// NOTE: JWT_SECRET has a default above; if you want to force explicit env, remove the default and uncomment check.
+// if (!JWT_SECRET) {
+//   console.error('ERROR: JWT_SECRET environment variable is not set.');
+//   process.exit(1);
+// }
 
 // --- Postgres pool (Render requires ssl with rejectUnauthorized:false) ---
 const pool = new Pool({
@@ -34,6 +35,13 @@ const pool = new Pool({
 
 // --- Helper functions ---
 const query = (text, params) => pool.query(text, params);
+
+// quick exists checker
+async function existsIn(table, id) {
+  if (!id) return false;
+  const q = await query(`SELECT 1 FROM ${table} WHERE id = $1 LIMIT 1`, [id]);
+  return q.rowCount > 0;
+}
 
 // Auth middleware
 function authenticateToken(req, res, next) {
@@ -79,7 +87,7 @@ app.post('/api/auth/register', async (req, res) => {
     const user = result.rows[0];
 
     // If role is patient and your patients table should have a row, create it (best-effort)
-    if (role.toLowerCase() === 'patient') {
+    if ((role || '').toLowerCase() === 'patient') {
       try {
         await query('INSERT INTO patients (name, age, phone, gender, address, created_at) VALUES ($1, NULL, NULL, NULL, NULL, now())', [name || email]);
       } catch (e) {
@@ -226,12 +234,10 @@ app.delete('/api/patients/:id', authenticateToken, requireRole('admin'), async (
 // --- DOCTORS ---
 app.get('/api/doctors', authenticateToken, async (req, res) => {
   try {
-    // try to select fields commonly present; if user_id exists return it
     const { rows } = await query('SELECT id, user_id, name, email, phone, specialty, qualifications, bio, created_at FROM doctors ORDER BY id DESC');
     res.json(rows);
   } catch (err) {
     console.error('GET /api/doctors', err);
-    // fallback: if table differs, return empty array
     return res.status(404).json({ error: 'Not found' });
   }
 });
@@ -279,35 +285,142 @@ app.delete('/api/doctors/:id', authenticateToken, requireRole('admin'), async (r
   }
 });
 
-// --- APPOINTMENTS ---
+// --- APPOINTMENTS (updated: accept multiple date field names + validate IDs) ---
 app.get('/api/appointments', authenticateToken, async (req, res) => {
   try {
-    const { rows } = await query('SELECT id, patient_id, patient_name, doctor_id, doctor_name, scheduled_at, status, created_at FROM appointments ORDER BY scheduled_at DESC NULLS LAST');
+    // return common shape: id, patient_id, patient_name, doctor_id, doctor_name, datetime, status, notes, created_at
+    const { rows } = await query(`
+      SELECT a.id,
+             a.patient_id,
+             COALESCE(a.patient_name, p.name) AS patient_name,
+             a.doctor_id,
+             COALESCE(a.doctor_name, d.name) AS doctor_name,
+             COALESCE(a.datetime, a.scheduled_at, a.appointment_date) AS datetime,
+             a.status,
+             a.notes,
+             a.created_at
+      FROM appointments a
+      LEFT JOIN patients p ON p.id = a.patient_id
+      LEFT JOIN doctors d ON d.id = a.doctor_id
+      ORDER BY COALESCE(a.datetime, a.scheduled_at, a.appointment_date, a.created_at) DESC
+    `);
     res.json(rows);
   } catch (err) {
     console.error('GET /api/appointments', err);
-    res.status(404).json({ error: 'Not found' });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/appointments/:id', authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT *, COALESCE(datetime, scheduled_at, appointment_date) AS resolved_datetime FROM appointments WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('GET /api/appointments/:id', err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
 app.post('/api/appointments', authenticateToken, async (req, res) => {
   try {
-    const { patient_id, patient_name, doctor_id, doctor_name, scheduled_at, status } = req.body || {};
-    const { rows } = await query('INSERT INTO appointments (patient_id, patient_name, doctor_id, doctor_name, scheduled_at, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,now()) RETURNING *', [patient_id||null, patient_name||null, doctor_id||null, doctor_name||null, scheduled_at||null, status||'scheduled']);
+    // Accept multiple possible field names from frontend
+    const {
+      patient_id,
+      patient_name,
+      doctor_id,
+      doctor_name,
+      datetime,
+      appointment_date,
+      scheduled_at,
+      status,
+      notes
+    } = req.body || {};
+
+    // Pick first available datetime-like field
+    const dt = datetime || appointment_date || scheduled_at || null;
+
+    // Validate IDs if provided to avoid FK errors and return helpful 400
+    if (patient_id) {
+      const ok = await existsIn('patients', patient_id);
+      if (!ok) return res.status(400).json({ error: `patient_id ${patient_id} not found` });
+    }
+    if (doctor_id) {
+      const ok = await existsIn('doctors', doctor_id);
+      if (!ok) return res.status(400).json({ error: `doctor_id ${doctor_id} not found` });
+    }
+
+    const { rows } = await query(
+      `INSERT INTO appointments (patient_id, patient_name, doctor_id, doctor_name, datetime, scheduled_at, appointment_date, status, notes, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now()) RETURNING id, patient_id, patient_name, doctor_id, doctor_name, COALESCE(datetime, scheduled_at, appointment_date) AS datetime, status, notes, created_at`,
+      [patient_id || null, patient_name || null, doctor_id || null, doctor_name || null, dt || null, scheduled_at || dt || null, appointment_date || dt || null, status || 'scheduled', notes || null]
+    );
+
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error('POST /api/appointments', err);
+    // detect common FK error from PG and return nicer message
+    if (err && err.code === '23503') {
+      return res.status(400).json({ error: 'Foreign key violation — check patient_id and doctor_id' });
+    }
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 app.put('/api/appointments/:id', authenticateToken, async (req, res) => {
   try {
-    const { scheduled_at, status } = req.body || {};
-    await query('UPDATE appointments SET scheduled_at=$1, status=$2 WHERE id=$3', [scheduled_at||null, status||null, req.params.id]);
-    res.json({ message: 'Updated' });
+    const {
+      patient_id,
+      patient_name,
+      doctor_id,
+      doctor_name,
+      datetime,
+      appointment_date,
+      scheduled_at,
+      status,
+      notes
+    } = req.body || {};
+
+    // Normalize datetime-ish field
+    const dt = datetime || appointment_date || scheduled_at || null;
+
+    // Ensure appointment exists
+    const ap = await query('SELECT id FROM appointments WHERE id=$1', [req.params.id]);
+    if (!ap.rowCount) return res.status(404).json({ error: 'Appointment not found' });
+
+    // Validate patient/doctor existence if provided
+    if (patient_id) {
+      const ok = await existsIn('patients', patient_id);
+      if (!ok) return res.status(400).json({ error: `patient_id ${patient_id} not found` });
+    }
+    if (doctor_id) {
+      const ok = await existsIn('doctors', doctor_id);
+      if (!ok) return res.status(400).json({ error: `doctor_id ${doctor_id} not found` });
+    }
+
+    await query(
+      `UPDATE appointments
+         SET patient_id = COALESCE($1, patient_id),
+             patient_name = COALESCE($2, patient_name),
+             doctor_id = COALESCE($3, doctor_id),
+             doctor_name = COALESCE($4, doctor_name),
+             datetime = COALESCE($5, datetime),
+             scheduled_at = COALESCE($6, scheduled_at),
+             appointment_date = COALESCE($7, appointment_date),
+             status = COALESCE($8, status),
+             notes = COALESCE($9, notes),
+             updated_at = now()
+       WHERE id = $10`,
+      [patient_id || null, patient_name || null, doctor_id || null, doctor_name || null, dt || null, scheduled_at || dt || null, appointment_date || dt || null, status || null, notes || null, req.params.id]
+    );
+
+    const q = await query('SELECT id, patient_id, patient_name, doctor_id, doctor_name, COALESCE(datetime, scheduled_at, appointment_date) AS datetime, status, notes, created_at, updated_at FROM appointments WHERE id=$1', [req.params.id]);
+    res.json(q.rows[0]);
   } catch (err) {
     console.error('PUT /api/appointments/:id', err);
+    if (err && err.code === '23503') {
+      return res.status(400).json({ error: 'Foreign key violation — check patient_id and doctor_id' });
+    }
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -477,7 +590,6 @@ app.post('/api/patient_history', authenticateToken, async (req, res) => {
   try {
     const { patient_id, record_type, title, body } = req.body || {};
     if (!patient_id) return res.status(400).json({ error: 'patient_id required' });
-    // fetch patient name if possible
     const p = (await query('SELECT name FROM patients WHERE id=$1', [patient_id])).rows[0];
     const { rows } = await query('INSERT INTO patient_history (patient_id, patient_name, record_type, title, body, created_at) VALUES ($1,$2,$3,$4,$5,now()) RETURNING *', [patient_id, (p && p.name) || null, record_type || 'note', title || null, body || null]);
     res.status(201).json(rows[0]);
